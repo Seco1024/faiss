@@ -455,6 +455,26 @@ void IndexHNSW::search_level_0(
     }
 }
 
+
+std::vector<std::vector<int>> IndexHNSW::extract_level0_graph() const {
+    const HNSW& hnsw = this->hnsw;
+    int ntotal = this->ntotal;
+
+    std::vector<std::vector<int>> level0_graph(ntotal);
+
+    for (int i = 0; i < ntotal; ++i) {
+        size_t begin, end;
+        hnsw.neighbor_range(i, 0, &begin, &end);
+        for (size_t j = begin; j < end; j++) {
+            int neighbor = hnsw.neighbor[j];
+            if (neighbor >= 0) {
+                level0_graph[i].push_back(neighbor);
+            }
+        }
+    }
+    return level0_graph;
+}
+
 void IndexHNSW::init_level_0_from_knngraph(
         int k,
         const float* D,
