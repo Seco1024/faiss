@@ -80,6 +80,9 @@ struct IndexHNSW : Index {
 
     std::vector<std::vector<int>> extract_level0_graph() const;
 
+    /* Create new ID for each nodes according to BFS order */
+    std::vector<int> bfs_reorder_level0(const std::vector<std::vector<int>>& level0_graph) const;
+
     /** Perform search only on level 0, given the starting points for
      * each vertex.
      *

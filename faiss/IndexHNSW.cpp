@@ -475,6 +475,43 @@ std::vector<std::vector<int>> IndexHNSW::extract_level0_graph() const {
     return level0_graph;
 }
 
+/*  */
+std::vector<int> IndexHNSW::bfs_reorder_level0(const std::vector<std::vector<int>>& level0_graph) const {
+    int total = level0_graph.size();
+    std::vector<int> new_order(ntotal, -1);
+    std::vector<bool> visited(ntotal, false);
+    std::queue<int> q;
+
+    int new_id = 0;
+
+    int start = this->hnsw.entry_point;
+    if (start == -1) start = 0;
+
+    q.push(start);
+    visited[start] = true;
+
+    while(!q.empty()) {
+        int node = q.front();
+        q.pop();
+        new_order[node] = new_id++;
+
+        for (int neighbor : level0_graph[node]) {
+            if (!visited[neighbor]) {
+                q.push(neighbor);
+                visited[neighbor] = true;
+            }
+        }
+    }
+
+    for (int i = 0; i < ntotal; i++) {
+        if (new_order[i] == -1) {
+            new_order[i] = new_id++;
+        }
+    }
+
+    return new_order;
+}
+
 void IndexHNSW::init_level_0_from_knngraph(
         int k,
         const float* D,
