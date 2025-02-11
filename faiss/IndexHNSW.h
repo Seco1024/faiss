@@ -78,10 +78,20 @@ struct IndexHNSW : Index {
 
     void shrink_level_0_neighbors(int size);
 
+    /* NEW: Get level0 graph */
     std::vector<std::vector<int>> extract_level0_graph() const;
 
-    /* Create new ID for each nodes according to BFS order */
+    /* NEW: Create new ID for each nodes according to BFS order */
     std::vector<int> bfs_reorder_level0(const std::vector<std::vector<int>>& level0_graph) const;
+
+    /* NEW: Reorder HNSW graph */
+    void reorder_hnsw_graph(const std::vector<int>& new_order);
+
+    /* NEW: Reorder storage page */
+    void reorder_storage_index(const std::vector<int>& new_order);
+
+    /* NEW: Wrapped BFS reordering function */
+    void bfs_reorder_and_optimize();
 
     /** Perform search only on level 0, given the starting points for
      * each vertex.

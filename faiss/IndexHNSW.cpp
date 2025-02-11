@@ -512,6 +512,76 @@ std::vector<int> IndexHNSW::bfs_reorder_level0(const std::vector<std::vector<int
     return new_order;
 }
 
+void IndexHNSW::reorder_hnsw_graph(const std::vector<int>& new_order) {
+    HNSW& hnsw = this->hnsw;
+    int ntotal = this->ntotal;
+
+    std::vector<int> new_to_old(ntotal);
+    for (size_t old_id = 0; old_id < new_order.size(); old_id++) {
+        int new_id = new_order[old_id];
+        new_to_old[new_id] = old_id; 
+    }
+
+    /* Reorganize adjacency list */
+    std::vector<int> new_neighbors(hnsw.neighbors.size(), -1);
+    for (int new_id = 0; new_id < ntotal; new_id++) {
+        int old_id = new_to_old[new_id];  
+        size_t begin, end;
+        hnsw.neighbor_range(old_id, 0, &begin, &end);
+
+        for (size_t j = begin; j < end; j++) {
+            int old_neighbor = hnsw.neighbors[j];
+            if (old_neighbor >= 0) {
+                int new_neighbor = new_order[old_neighbor]; 
+                new_neighbors[j] = new_neighbor;
+            }
+        }
+    }
+
+    hnsw.neighbors.swap(new_neighbors);
+    int old_entry = hnsw.entry_point;
+    hnsw.entry_point = new_order[old_entry];
+}
+
+void IndexHNSW::reorder_storage_index(const std::vector<int>& new_order) {
+    IndexFlatCodes* storage = dynamic_cast<IndexFlatCodes*>(this->storage);
+    if(!storage) {
+        FAISS_THROW_MSG("IndexFlatCodes storage is required for reordering.");
+    }
+
+    size_t code_size = storage->codes.size();
+    size_t page_size = 4096;
+    size_t num_per_page = page_size / code_size;
+
+    std::vector<uint8_t> new_codes(storage->codes.size());
+
+    for (size_t i = 0; i < new_order.size(); i++) {
+        int old_id = new_order[i];
+        std::memcpy(
+            new_codes.data() + i * code_size, 
+            storage->codes.data() + old_id * code_size,
+            code_size
+        );
+    }
+    storage->codes.swap(new_codes);
+}
+
+void IndexHNSW::bfs_reorder_and_optimize() {
+    std::cout << "提取 Level 0 鄰接圖..." << std::endl;
+    std::vector<std::vector<int>> level0_graph = extract_level0_graph();
+
+    std::cout << "執行 BFS Reordering..." << std::endl;
+    std::vector<int> new_order = bfs_reorder_level0(level0_graph);
+
+    std::cout << "重新組織 HNSW Adjacency List..." << std::endl;
+    reorder_hnsw_graph(new_order);
+
+    std::cout << "重新排列索引中的向量順序..." << std::endl;
+    reorder_storage_index(new_order);
+
+    std::cout << "BFS Reordering 完成！" << std::endl;
+}
+
 void IndexHNSW::init_level_0_from_knngraph(
         int k,
         const float* D,
