@@ -466,7 +466,7 @@ std::vector<std::vector<int>> IndexHNSW::extract_level0_graph() const {
         size_t begin, end;
         hnsw.neighbor_range(i, 0, &begin, &end);
         for (size_t j = begin; j < end; j++) {
-            int neighbor = hnsw.neighbor[j];
+            int neighbor = hnsw.neighbors[j];
             if (neighbor >= 0) {
                 level0_graph[i].push_back(neighbor);
             }

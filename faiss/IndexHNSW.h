@@ -78,7 +78,7 @@ struct IndexHNSW : Index {
 
     void shrink_level_0_neighbors(int size);
 
-    std::vector<std::vector<int>> IndexHNSW::extract_level0_graph() const;
+    std::vector<std::vector<int>> extract_level0_graph() const;
 
     /** Perform search only on level 0, given the starting points for
      * each vertex.
