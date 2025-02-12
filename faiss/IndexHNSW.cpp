@@ -6,6 +6,7 @@
  */
 
 #include <faiss/IndexHNSW.h>
+#include <iomanip>
 
 #include <omp.h>
 #include <cassert>
@@ -301,6 +302,8 @@ void IndexHNSW::search(
     RH bres(n, distances, labels, k);
 
     hnsw_search(this, n, x, bres, params);
+    std::cout << "nhops = " << hnsw_stats.nhops << std::endl;
+
 
     if (is_similarity_metric(this->metric_type)) {
         // we need to revert the negated distances
@@ -475,7 +478,6 @@ std::vector<std::vector<int>> IndexHNSW::extract_level0_graph() const {
     return level0_graph;
 }
 
-/*  */
 std::vector<int> IndexHNSW::bfs_reorder_level0(const std::vector<std::vector<int>>& level0_graph) const {
     int total = level0_graph.size();
     std::vector<int> new_order(ntotal, -1);
@@ -512,7 +514,7 @@ std::vector<int> IndexHNSW::bfs_reorder_level0(const std::vector<std::vector<int
     return new_order;
 }
 
-void IndexHNSW::reorder_hnsw_graph(const std::vector<int>& new_order) {
+std::vector<int> IndexHNSW::get_new_to_old(const std::vector<int>& new_order) {
     HNSW& hnsw = this->hnsw;
     int ntotal = this->ntotal;
 
@@ -522,41 +524,68 @@ void IndexHNSW::reorder_hnsw_graph(const std::vector<int>& new_order) {
         new_to_old[new_id] = old_id; 
     }
 
-    /* Reorganize adjacency list */
-    std::vector<int> new_neighbors(hnsw.neighbors.size(), -1);
+    std::vector<int> new_levels(ntotal);
     for (int new_id = 0; new_id < ntotal; new_id++) {
-        int old_id = new_to_old[new_id];  
-        size_t begin, end;
-        hnsw.neighbor_range(old_id, 0, &begin, &end);
+        int old_id = new_to_old[new_id];
+        new_levels[new_id] = hnsw.levels[old_id];
+    }
+    hnsw.levels.swap(new_levels);
+    return new_to_old;
+}
 
-        for (size_t j = begin; j < end; j++) {
-            int old_neighbor = hnsw.neighbors[j];
-            if (old_neighbor >= 0) {
-                int new_neighbor = new_order[old_neighbor]; 
-                new_neighbors[j] = new_neighbor;
+
+void IndexHNSW::reorder_hnsw_graph(const std::vector<int>& new_order, const std::vector<int>& new_to_old) {
+    HNSW& hnsw = this->hnsw;
+    int ntotal = this->ntotal;
+
+    std::vector<size_t> new_offsets(ntotal + 1, 0);
+    std::vector<storage_idx_t> new_neighbors(hnsw.neighbors.size(), -1);
+    size_t counter = 0;
+
+    for (int new_id = 0; new_id < ntotal; new_id++) {
+        int num_layers = hnsw.levels[new_id];
+        int old_id = new_to_old[new_id];
+        new_offsets[new_id] = counter;
+        
+        for (int layer = 0; layer < num_layers; layer++) {
+            size_t begin, end;
+            hnsw.neighbor_range(old_id, layer, &begin, &end);
+            for (size_t i = begin; i < end; i++) {
+                storage_idx_t old_neighbor = hnsw.neighbors[i];
+                if (old_neighbor >= 0) {
+                    storage_idx_t new_neighbor = new_order[old_neighbor];
+                    if (counter < new_neighbors.size()) {
+                        new_neighbors[counter++] = new_neighbor;
+                    } else {
+                        new_neighbors.push_back(new_neighbor);
+                        counter++;
+                    }
+                }
             }
         }
     }
 
+    new_offsets[ntotal] = counter;
+    new_neighbors.resize(counter);
+    
+    hnsw.offsets.swap(new_offsets);
     hnsw.neighbors.swap(new_neighbors);
-    int old_entry = hnsw.entry_point;
-    hnsw.entry_point = new_order[old_entry];
+    hnsw.entry_point = new_order[hnsw.entry_point];
 }
 
-void IndexHNSW::reorder_storage_index(const std::vector<int>& new_order) {
+
+void IndexHNSW::reorder_storage_codes(const std::vector<int>& new_to_old) {
     IndexFlatCodes* storage = dynamic_cast<IndexFlatCodes*>(this->storage);
     if(!storage) {
         FAISS_THROW_MSG("IndexFlatCodes storage is required for reordering.");
     }
 
-    size_t code_size = storage->codes.size();
-    size_t page_size = 4096;
-    size_t num_per_page = page_size / code_size;
+    size_t code_size = storage->code_size;
+    size_t total_codes = storage->codes.size();
+    std::vector<uint8_t> new_codes(total_codes);
 
-    std::vector<uint8_t> new_codes(storage->codes.size());
-
-    for (size_t i = 0; i < new_order.size(); i++) {
-        int old_id = new_order[i];
+    for (size_t i = 0; i < new_to_old.size(); i++) {
+        int old_id = new_to_old[i];
         std::memcpy(
             new_codes.data() + i * code_size, 
             storage->codes.data() + old_id * code_size,
@@ -566,20 +595,22 @@ void IndexHNSW::reorder_storage_index(const std::vector<int>& new_order) {
     storage->codes.swap(new_codes);
 }
 
-void IndexHNSW::bfs_reorder_and_optimize() {
+std::vector<int> IndexHNSW::bfs_reorder() {
     std::cout << "提取 Level 0 鄰接圖..." << std::endl;
     std::vector<std::vector<int>> level0_graph = extract_level0_graph();
 
     std::cout << "執行 BFS Reordering..." << std::endl;
     std::vector<int> new_order = bfs_reorder_level0(level0_graph);
+    std::vector<int> new_to_old = get_new_to_old(new_order);
 
     std::cout << "重新組織 HNSW Adjacency List..." << std::endl;
-    reorder_hnsw_graph(new_order);
+    reorder_hnsw_graph(new_order, new_to_old);
 
     std::cout << "重新排列索引中的向量順序..." << std::endl;
-    reorder_storage_index(new_order);
+    reorder_storage_codes(new_to_old);
 
     std::cout << "BFS Reordering 完成！" << std::endl;
+    return new_order;
 }
 
 void IndexHNSW::init_level_0_from_knngraph(

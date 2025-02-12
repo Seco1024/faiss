@@ -84,14 +84,17 @@ struct IndexHNSW : Index {
     /* NEW: Create new ID for each nodes according to BFS order */
     std::vector<int> bfs_reorder_level0(const std::vector<std::vector<int>>& level0_graph) const;
 
+    /* NEW: Get reversed mapping table */
+    std::vector<int> get_new_to_old(const std::vector<int>& new_order);
+
     /* NEW: Reorder HNSW graph */
-    void reorder_hnsw_graph(const std::vector<int>& new_order);
+    void reorder_hnsw_graph(const std::vector<int>& new_order, const std::vector<int>& new_to_old);
 
     /* NEW: Reorder storage page */
-    void reorder_storage_index(const std::vector<int>& new_order);
+    void reorder_storage_codes(const std::vector<int>& new_to_old);
 
     /* NEW: Wrapped BFS reordering function */
-    void bfs_reorder_and_optimize();
+    std::vector<int>  bfs_reorder();
 
     /** Perform search only on level 0, given the starting points for
      * each vertex.
