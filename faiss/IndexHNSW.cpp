@@ -302,15 +302,18 @@ void IndexHNSW::search(
     RH bres(n, distances, labels, k);
 
     hnsw_search(this, n, x, bres, params);
-    std::cout << "nhops = " << hnsw_stats.nhops << std::endl;
-
-
+    
     if (is_similarity_metric(this->metric_type)) {
         // we need to revert the negated distances
         for (size_t i = 0; i < k * n; i++) {
             distances[i] = -distances[i];
         }
     }
+
+    std::cout << "nhops = " << hnsw_stats.nhops << std::endl;
+    std::cout << "ndis = " << hnsw_stats.ndis << std::endl;
+    std::cout << "n1 = " << hnsw_stats.n1 << std::endl;
+    std::cout << "n2 = " << hnsw_stats.n2 << std::endl;
 }
 
 void IndexHNSW::range_search(
@@ -524,12 +527,12 @@ std::vector<int> IndexHNSW::get_new_to_old(const std::vector<int>& new_order) {
         new_to_old[new_id] = old_id; 
     }
 
-    std::vector<int> new_levels(ntotal);
-    for (int new_id = 0; new_id < ntotal; new_id++) {
-        int old_id = new_to_old[new_id];
-        new_levels[new_id] = hnsw.levels[old_id];
-    }
-    hnsw.levels.swap(new_levels);
+    // std::vector<int> new_levels(ntotal);
+    // for (int new_id = 0; new_id < ntotal; new_id++) {
+    //     int old_id = new_to_old[new_id];
+    //     new_levels[new_id] = hnsw.levels[old_id];
+    // }
+    // hnsw.levels.swap(new_levels);
     return new_to_old;
 }
 
@@ -538,39 +541,51 @@ void IndexHNSW::reorder_hnsw_graph(const std::vector<int>& new_order, const std:
     HNSW& hnsw = this->hnsw;
     int ntotal = this->ntotal;
 
-    std::vector<size_t> new_offsets(ntotal + 1, 0);
-    std::vector<storage_idx_t> new_neighbors(hnsw.neighbors.size(), -1);
-    size_t counter = 0;
-
-    for (int new_id = 0; new_id < ntotal; new_id++) {
-        int num_layers = hnsw.levels[new_id];
-        int old_id = new_to_old[new_id];
-        new_offsets[new_id] = counter;
-        
-        for (int layer = 0; layer < num_layers; layer++) {
-            size_t begin, end;
-            hnsw.neighbor_range(old_id, layer, &begin, &end);
-            for (size_t i = begin; i < end; i++) {
-                storage_idx_t old_neighbor = hnsw.neighbors[i];
-                if (old_neighbor >= 0) {
-                    storage_idx_t new_neighbor = new_order[old_neighbor];
-                    if (counter < new_neighbors.size()) {
-                        new_neighbors[counter++] = new_neighbor;
-                    } else {
-                        new_neighbors.push_back(new_neighbor);
-                        counter++;
-                    }
-                }
-            }
-        }
+    std::vector<idx_t> map(ntotal);
+    for (int i = 0; i < ntotal; i++) {
+        map[i] = new_to_old[i];
     }
 
-    new_offsets[ntotal] = counter;
-    new_neighbors.resize(counter);
+    // 使用 permute_entries 重新排序 HNSW 結構
+    hnsw.permute_entries(map.data());
+
+    // std::vector<size_t> new_offsets(ntotal + 1, 0);
+    // std::vector<storage_idx_t> new_neighbors(hnsw.neighbors.size(), -1);
+    // size_t counter = 0;
+
+    // for (int new_id = 0; new_id < ntotal; new_id++) {
+    //     int num_layers = hnsw.levels[new_id];
+    //     int old_id = new_to_old[new_id];
+    //     new_offsets[new_id] = counter;
+        
+    //     for (int layer = 0; layer < num_layers; layer++) {
+    //         size_t begin, end;
+    //         hnsw.neighbor_range(old_id, layer, &begin, &end);
+    //         for (size_t i = begin; i < end; i++) {
+    //             storage_idx_t old_neighbor = hnsw.neighbors[i];
+    //             if (old_neighbor >= 0) {
+    //                 storage_idx_t new_neighbor = new_order[old_neighbor];
+    //                 if (counter < new_neighbors.size()) {
+    //                     new_neighbors[counter++] = new_neighbor;
+    //                 } else {
+    //                     new_neighbors.push_back(new_neighbor);
+    //                     std::cout << "PUSH" << std::endl;
+    //                     counter++;
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
+
+    // std::cout << "New: " << new_neighbors.size() << std::endl;
+    // std::cout << "Old: " << hnsw.neighbors.size() << std::endl;
+
+    // new_offsets[ntotal] = counter;
+    // new_neighbors.resize(counter);
     
-    hnsw.offsets.swap(new_offsets);
-    hnsw.neighbors.swap(new_neighbors);
-    hnsw.entry_point = new_order[hnsw.entry_point];
+    // hnsw.offsets.swap(new_offsets);
+    // hnsw.neighbors.swap(new_neighbors);
+    // hnsw.entry_point = new_order[hnsw.entry_point];
 }
 
 
@@ -592,7 +607,11 @@ void IndexHNSW::reorder_storage_codes(const std::vector<int>& new_to_old) {
             code_size
         );
     }
+
+    std::cout << "New Codes: " << new_codes.size() << std::endl;
+    std::cout << "Old Codes: " << storage->codes.size() << std::endl;
     storage->codes.swap(new_codes);
+    std::cout << "Final Codes: " << storage->codes.size() << std::endl;
 }
 
 std::vector<int> IndexHNSW::bfs_reorder() {
